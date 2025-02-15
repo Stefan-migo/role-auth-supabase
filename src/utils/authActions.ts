@@ -1,7 +1,9 @@
 // src/utils/authActions.ts
-
+'use server'
 import { User, Session } from '@supabase/supabase-js';
-import { createClient } from './supabase/client';
+import { createSupabaseServerClient } from './supabase/server';
+import { redirect } from 'next/navigation';
+
 
 export type StaffRole = 'sales' | 'optometrist' | 'admin';
 
@@ -30,53 +32,21 @@ export interface StaffSignupData {
  * 2. Inserts additional profile info into the "customers" table.
  */
 export async function signUpCustomer(data: CustomerSignupData) {
-  const supabase = createClient();
-  const { email, password, ...profile } = data;
-
-  // 1. Create auth user with metadata
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
-    email_confirm: true,
+  const supabase = await createSupabaseServerClient();
+  
+  const { data: authData, error } = await supabase.auth.signUp({
+    email: data.email,
+    password: data.password,
     options: {
       data: {
-        first_name: data.first_name,
-        last_name: data.last_name,
-        phone: data.phone,
+        ...data,
         user_type: 'customer'
       }
     }
   });
 
-  if (authError) throw new Error(`Auth error: ${authError.message}`);
-  if (!authData.user) throw new Error('Signup failed: No user created');
-
-  // 2. Wait for session propagation
-  let retries = 5;
-  while (retries > 0) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) break;
-    await new Promise(resolve => setTimeout(resolve, 200));
-    retries--;
-  }
-
-  // // 3. Insert customer profile
-  // const { error: dbError } = await supabase.from('customers').insert({
-  //   user_id: authData.user.id,
-  //   email,
-  //   ...profile
-  // });
-
-  // if (dbError) {
-  //   // Rollback auth user if profile creation fails
-  //   await supabase.auth.admin.deleteUser(authData.user.id);
-  //   throw new Error(`Profile creation failed: ${dbError.message}`);
-  // }
-
-  return {
-    user: authData.user,
-    session: authData.session
-  };
+  if (error) throw error;
+  return authData;
 }
 
 /**
@@ -84,44 +54,22 @@ export async function signUpCustomer(data: CustomerSignupData) {
  * 1. Creates a new auth user.
  * 2. Inserts additional profile info (including role) into the "staff" table.
  */
-export async function signUpStaff(data: StaffSignupData): Promise<{
-  user: User | null;
-  session: Session | null;
-}> {
-  const { email, password, role, ...profile } = data;
-  const supabase = createClient();
-
-  // Create a new auth entry with email confirmed (FOR DEVELOPMENT ONLY)
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email,
-    password,
+export async function signUpStaff(data: StaffSignupData) {
+  const supabase = await createSupabaseServerClient();
+  
+  const { data: authData, error } = await supabase.auth.signUp({
+    email: data.email,
+    password: data.password,
     options: {
-        email_confirm: true, // REMOVE THIS IN PRODUCTION
-      },
+      data: {
+        ...data,
+        user_type: 'staff'
+      }
+    }
   });
-  if (authError) {
-    throw new Error(`Auth signup error: ${authError.message}`);
-  }
-  const user = authData.user;
-  if (!user) {
-    throw new Error('Staff signup failed: no user returned.');
-  }
 
-  // Insert the staff profile data into the "staff" table.
-  // Again, we use "user_id" to store the auth user’s id.
-  const { error: dbError } = await supabase.from('staff').insert([
-    {
-      user_id: user.id,
-      email,
-      role,
-      ...profile,
-    },
-  ]);
-  if (dbError) {
-    throw new Error(`Database error: ${dbError.message}`);
-  }
-
-  return { user, session: authData.session };
+  if (error) throw error;
+  return authData;
 }
 
 /**
@@ -129,50 +77,27 @@ export async function signUpStaff(data: StaffSignupData): Promise<{
  * Authenticates the user and then checks the "staff" table to determine if the user is a staff member.
  */
 export async function signInUser(email: string, password: string) {
-  const supabase = createClient();
+  const supabase = await createSupabaseServerClient();
+
+  console.log('[1] Attempting sign in with:', email);
+
   const { data: authData, error } = await supabase.auth.signInWithPassword({
     email,
-    password,
+    password
   });
+
   if (error) throw new Error(`Sign in error: ${error.message}`);
+  if (!authData.session) throw new Error('Sign in failed: No session created');
 
-  // Wait briefly for auth state propagation.
-  await new Promise((resolve) => setTimeout(resolve, 100));
-
-  // Retrieve fresh user data.
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Sign in failed: no user returned.');
-
-  // Check if the user is a staff member by querying the "staff" table.
-  let role = 'customer';
-  const { data: staffData } = await supabase
-    .from('staff')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-  if (staffData && staffData.role) {
-    role = staffData.role;
-  }
-
-  return { user, session: authData.session, role };
+  return { session: authData.session };
 }
 
-/**
- * Sign out the currently authenticated user.
- */
-export async function signOutUser(): Promise<void> {
-  const supabase = createClient();
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    throw new Error(`Sign out error: ${error.message}`);
-  }
-}
 
 /**
  * Retrieve the current authenticated user.
  */
 export async function getCurrentUser(): Promise<User | null> {
-  const supabase = createClient();
+  const supabase = await createSupabaseServerClient();
   // Check if we have a valid session.
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
@@ -186,40 +111,73 @@ export async function getCurrentUser(): Promise<User | null> {
   return user;
 }
 
-/**
- * (Optional) Utility function to fetch the role of the currently authenticated user.
- * Queries the "staff" table using the user_id; if not found, defaults to "customer".
- */
-export async function getUserRole(userId: string): Promise<string | null> {
-  const supabase = createClient();
-  const { data: staffData, error: staffError } = await supabase
-    .from('staff')
-    .select('role')
-    .eq('user_id', userId)
-    .single();
-  if (!staffError && staffData) {
-    return staffData.role;
-  }
-  return 'customer';
-}
 
-// Sign in with Google
-export async function signInWithGoogle() {
-  const supabase = createClient();
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      queryParams: {
-        access_type: "offline",
-        prompt: "consent",
-      },
-    },
+
+export async function resetPassword(email: string) {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/auth/reset-password`,
   });
 
+  if (error) throw error;
+  return true;
+}
+
+export async function deleteUser(userId: string) {
+  const supabase = await createSupabaseServerClient();
+  
+  // Use transaction to delete from both tables
+  const { error } = await supabase.rpc('delete_user', {
+    user_id: userId
+  });
+
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+// Basic update (name, phone)
+export async function updateMemberBasic(userId: string, data: Partial<User>) {
+  const supabase = await createSupabaseServerClient();
+  
+  const { error } = await supabase
+    .from('staff')
+    .update(data)
+    .eq('user_id', userId)
+    .select();
+
   if (error) {
-    console.log(error);
-    redirect("/error");
+    const { error: customerError } = await supabase
+      .from('customers')
+      .update(data)
+      .eq('user_id', userId)
+      .select();
+      
+    if (customerError) throw new Error(customerError.message);
+  }
+  
+  return true;
+}
+
+// Advanced update (email/password)
+export async function updateMemberAdvanced(userId: string, updates: { 
+  email?: string, 
+  password?: string 
+}) {
+  const supabase = await createSupabaseServerClient();
+  
+  if (updates.email) {
+    const { error } = await supabase.auth.admin.updateUserById(userId, {
+      email: updates.email
+    });
+    if (error) throw new Error(error.message);
   }
 
-  redirect(data.url);
+  if (updates.password) {
+    const { error } = await supabase.auth.admin.updateUserById(userId, {
+      password: updates.password
+    });
+    if (error) throw new Error(error.message);
+  }
+  
+  return true;
 }

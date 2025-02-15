@@ -3,9 +3,11 @@
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
 
-export async function createClient() {
-  const cookieStore = await cookies()
+
+export async function createSupabaseServerClient() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,4 +31,18 @@ export async function createClient() {
       }
     }
   )
+}
+
+export async function createAdminClient() {
+
+	return createClient(
+		process.env.NEXT_PUBLIC_SUPABASE_URL!, 
+		process.env.SERVICE_ROLE!,
+		{
+			auth: {
+				autoRefreshToken: false,
+				persistSession: false,
+			}
+		})
+
 }

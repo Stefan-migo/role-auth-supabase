@@ -22,14 +22,18 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { AuthFormSchema, type AuthFormValues } from '@/schemas/auth-schema';
+import { useAuthActions } from '@/hooks/useAuthActions';
+import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/lib/stores/auth.store'; 
 
 interface AuthFormProps {
   mode: 'login' | 'customer-signup' | 'staff-signup';
-  onSubmit: (values: AuthFormValues) => void;
   loading?: boolean;
 }
 
-export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
+export function AuthForm({ mode, loading }: AuthFormProps) {
+  const { handleAuthSubmit } = useAuthActions();
+  const { authLoading } = useAuthStore();
   const form = useForm<AuthFormValues>({
     resolver: zodResolver(AuthFormSchema),
     defaultValues: {
@@ -46,11 +50,28 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
       }),
     },
   });
-  
+
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+      <form onSubmit={form.handleSubmit(handleAuthSubmit)} className={cn("flex flex-col gap-4")}>
+
+        {mode == 'login' && (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <h1 className="text-2xl font-bold">Login to your account</h1>
+            <p className="text-balance text-sm text-muted-foreground">
+              Enter your email below to login to your account
+            </p>
+          </div>
+        )}
+        {mode !== 'login' && (
+
+          <div className="flex flex-col items-center gap-4 text-center">
+            <h1 className="text-2xl font-bold">Create a new account</h1>
+          </div>
+        )}
+
+
         {/* Hidden mode field */}
         <input type="hidden" {...form.register('mode')} />
 
@@ -83,6 +104,15 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
             </FormItem>
           )}
         />
+        {mode == 'login' && (
+          <a
+            href="/auth/reset-password"
+            className="ml-auto text-sm underline-offset-4 hover:underline"
+          >
+            Forgot your password?
+          </a>
+        )}
+
 
         {/* Additional fields for signup */}
         {mode !== 'login' && (
@@ -160,10 +190,17 @@ export function AuthForm({ mode, onSubmit, loading }: AuthFormProps) {
           />
         )}
 
-        <Button type="submit" className="w-full" disabled={loading}>
-          {mode === 'login' ? 'Sign In' : 'Create Account'}
+        <Button
+          type="submit"
+          className="w-full"
+          disabled={authLoading}
+        >
+          {authLoading ? 'Loading...' : `${mode === 'login' ? 'Sign In' : 'Create Account'}`}
+          {/* {mode === 'login' ? 'Sign In' : 'Create Account'} */}
         </Button>
       </form>
     </Form>
   );
 }
+
+

@@ -1,9 +1,14 @@
 //src/app/page.tsx
 'use client';
 
+import LogoutButton from '@/components/LogoutButton';
+import { useAuthStore } from '@/lib/stores/auth.store';
+
 import Link from 'next/link';
 
 export default function Home() {
+  const { role, user } = useAuthStore()
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
       <div className="text-center space-y-8">
@@ -21,6 +26,15 @@ export default function Home() {
             Get Started
           </Link>
         </div>
+        {user ? (
+          <div className="flex flex-col items-center gap-4">
+            <p>Logged in as: {user.email}</p>
+            <p>Your role: {role}</p>
+            <LogoutButton />
+          </div>
+        ) : (
+          <p>No user is logged in.</p>
+        )}
       </div>
     </div>
   );
